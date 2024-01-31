@@ -1,10 +1,12 @@
 package block
 
 import (
+	"block_chain_golang/util"
 	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"github.com/cloudflare/cfssl/scan/crypto/sha256"
 	log "github.com/corgi-kx/logcustom"
 	"math/big"
 	"os"
@@ -77,4 +79,40 @@ func (b bitcoinKeys) jointSpeed() []byte {
 	}
 	//截取前40位
 	return bs[:40]
+}
+
+// 判断是否是有效的比特币地址
+func IsVailBitcoinAddress(address string) bool {
+	addressBytes := []byte(address)
+	//对地址字节数组进行加密
+	fullhash := util.Base58Decode(addressBytes)
+	if len(fullhash) != 25 {
+		return false
+	}
+	prefixHash := fullhash[:len(fullhash)-checkSum]
+	tailHash := fullhash[len(fullhash)-checkSum:]
+	tailHash2 := checkSumHash(prefixHash)
+	// 判断是否相等
+	if bytes.Compare(tailHash, tailHash2[:]) == 0 {
+		return true
+	}
+	return false
+}
+
+// 生成公钥哈希
+func generatePublicKeyHash(publicKey []byte) []byte {
+	sha256PubKey := sha256.Sum256(publicKey)
+	r := util.NewRipemd160()
+	r.Reset()
+	r.Write(sha256PubKey[:])
+	ripPubKey := r.Sum(nil)
+	return ripPubKey
+	return nil
+}
+
+func checkSumHash(versionPublickeyHash []byte) []byte {
+	sum256 := sha256.Sum256(versionPublickeyHash)
+	versionPublickeyHash1 := sha256.Sum256(sum256[:])
+	tailHash := versionPublickeyHash1[:checkSum]
+	return tailHash
 }
