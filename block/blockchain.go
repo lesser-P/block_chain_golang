@@ -84,10 +84,13 @@ func (bc *blockchain) findAllUTXOs() map[string][]*UTXO {
 			}
 		VoutTag:
 			for index, output := range ts.Vout {
+				// 当前交易的hash没有输入说明这个输出没有被任何输入引用，因此他是一个未花费的输出，将其添加到utxos切片中。
 				if txInputmap[string(ts.TxHash)] == nil {
 					utxos = append(utxos, &UTXO{ts.TxHash, index, output})
 				} else {
+					// 有输入数据则遍历这些输入
 					for _, input := range txInputmap[string(ts.TxHash)] {
+						//如果相同则说明这个输出已经被花费了，不需要添加到utxos切片中
 						if input.Index == index {
 							continue VoutTag
 						}
