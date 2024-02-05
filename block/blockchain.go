@@ -49,7 +49,8 @@ func (bc *blockchain) CreateGenesisTransaction(address string, value int, send S
 	send.SendVersionToPeers(1)
 	fmt.Println("已生成创世区块")
 	// 重置utxo数据库，将创世数据存入
-
+	utxos := UTXOHandle{bc}
+	utxos.ResetUTXODataBase()
 }
 
 // 创建区块链
@@ -57,6 +58,23 @@ func (bc *blockchain) newGenesisBlockchain(transaction []Transaction) {
 	// 判断一下是否已生成创世区块
 	if len(bc.DB.View([]byte(LastBlockHashMapping), database.BlockBucket)) != 0 {
 		log.Error("已生成创世区块")
+	}
+	// 生成创世区块
+	genesisBlock := newGenesisBlock(transaction)
+	// 添加到区块数据库
+	bc.AddBlock(genesisBlock)
+
+}
+
+// 添加区块信息到数据库，并更新lastHash
+func (bc *blockchain) AddBlock(block *Block) {
+	bc.DB.Put(block.Hash, block.Serialize(), database.BlockBucket)
+	iterator := NewBlockchainIterator(bc)
+	// 获得当前区块
+	currentBlock := iterator.Next()
+	if currentBlock == nil || currentBlock.Height < block.Height {
+		// 这个更像是一个更新最新区块的操作
+		bc.DB.Put([]byte(LastBlockHashMapping), block.Hash, database.BlockBucket)
 	}
 
 }
@@ -107,3 +125,26 @@ func (bc *blockchain) findAllUTXOs() map[string][]*UTXO {
 	}
 	return utxosMap
 }
+
+// 创建挖矿奖励地址交易
+func (bc *blockchain) CreateRewardTransaction(address string) Transaction {
+	if address == "" {
+		log.Warnf("没有设置挖矿奖励地址，挖矿成功则不会产生奖励")
+		return Transaction{}
+	}
+	// 判断地址格式是否正确
+	if !IsVailBitcoinAddress(address) {
+		log.Warnf("地址格式不正确%s", address)
+		return Transaction{}
+	}
+	publicKeyHashByte := getPublicKeyHashFromAddress(address)
+	txo := TxOutput{
+		Value:         TokenRewardNum,
+		PublicKeyHash: publicKeyHashByte,
+	}
+	tx := Transaction{nil, nil, []TxOutput{txo}}
+	tx.hash()
+	return tx
+}
+
+//

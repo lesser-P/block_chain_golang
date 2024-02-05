@@ -116,3 +116,10 @@ func checkSumHash(versionPublickeyHash []byte) []byte {
 	tailHash := versionPublickeyHash1[:checkSum]
 	return tailHash
 }
+
+func getPublicKeyHashFromAddress(address string) []byte {
+	addressByte := []byte(address)
+	fullHash := util.Base58Decode(addressByte)
+	publicKeyHash := fullHash[1 : len(fullHash)-checkSum]
+	return publicKeyHash
+}
