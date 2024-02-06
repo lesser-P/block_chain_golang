@@ -59,18 +59,35 @@ func (u *UTXOHandle) dserialize(d []byte) []*UTXO {
 // 获取数据库中为消费的utxo
 func (u *UTXOHandle) findUTXOFromAddress(address string) []*UTXO {
 	publicKeyHash := getPublicKeyHashFromAddress(address)
-	utxosSlic := []UTXO{}
+	utxosSlice := []*UTXO{}
 	// 获取boly迭代器
 	DBFileName := "blockchain" + ListenPort + ".db"
 	db, err := bolt.Open(DBFileName, 0600, nil)
 	if err != nil {
 		log.Panic(err)
 	}
-	db.View(func(tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(database.UTXOBucket))
 		if b == nil {
 			return errors.New("datebase view err: not find bucket")
 		}
-		cursor := b.Cursor()
+		c := b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			utxos := u.dserialize(v)
+			for _, utxo := range utxos {
+				if bytes.Equal(utxo.Vout.PublicKeyHash, publicKeyHash) {
+					utxosSlice = append(utxosSlice, utxo)
+				}
+			}
+		}
+		return nil
 	})
+	if err != nil {
+		log.Panic(err)
+	}
+	err = db.Close()
+	if err != nil {
+		log.Error("db close err:", err)
+	}
+	return utxosSlice
 }
