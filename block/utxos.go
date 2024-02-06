@@ -4,6 +4,8 @@ import (
 	"block_chain_golang/database"
 	"bytes"
 	"encoding/gob"
+	"errors"
+	"github.com/boltdb/bolt"
 	log "github.com/corgi-kx/logcustom"
 )
 
@@ -52,4 +54,23 @@ func (u *UTXOHandle) dserialize(d []byte) []*UTXO {
 		log.Panic(err)
 	}
 	return model
+}
+
+// 获取数据库中为消费的utxo
+func (u *UTXOHandle) findUTXOFromAddress(address string) []*UTXO {
+	publicKeyHash := getPublicKeyHashFromAddress(address)
+	utxosSlic := []UTXO{}
+	// 获取boly迭代器
+	DBFileName := "blockchain" + ListenPort + ".db"
+	db, err := bolt.Open(DBFileName, 0600, nil)
+	if err != nil {
+		log.Panic(err)
+	}
+	db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(database.UTXOBucket))
+		if b == nil {
+			return errors.New("datebase view err: not find bucket")
+		}
+		cursor := b.Cursor()
+	})
 }

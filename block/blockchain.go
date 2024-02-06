@@ -2,6 +2,7 @@ package block
 
 import (
 	"block_chain_golang/database"
+	"encoding/json"
 	"fmt"
 	log "github.com/corgi-kx/logcustom"
 )
@@ -147,4 +148,107 @@ func (bc *blockchain) CreateRewardTransaction(address string) Transaction {
 	return tx
 }
 
-//
+// 创建UXTO交易实例
+func (bc *blockchain) CreateTransaction(from, to string, amount string, send Sender) {
+	// 判断是否已生成创世区块
+	if len(bc.DB.View([]byte(LastBlockHashMapping), database.BlockBucket)) == 0 {
+		log.Error("还没有生成创世区块，不可进行转账操作！")
+		return
+	}
+	// 判断是否设置了挖矿地址，没设置的话会给出提示
+	if len(bc.DB.View([]byte(RewardAddrMapping), database.AddrBucket)) == 0 {
+		log.Error("没有设置挖矿地址，如果挖出区块将不会给予奖励代币!")
+	}
+
+	fromSlice := []string{}
+	toSlice := []string{}
+	amountSlice := []int{}
+
+	// 对传入的信息进行交验检测
+	err := json.Unmarshal([]byte(from), &fromSlice)
+	if err != nil {
+		log.Error("json err", err)
+		return
+	}
+	err = json.Unmarshal([]byte(to), &toSlice)
+	if err != nil {
+		log.Error("json err", err)
+		return
+	}
+	err = json.Unmarshal([]byte(amount), &amountSlice)
+	if err != nil {
+		log.Error("json err", err)
+		return
+	}
+	if len(fromSlice) != len(toSlice) || len(fromSlice) != len(amountSlice) {
+		log.Error("转账数组长度不一致")
+		return
+	}
+
+	for i, v := range fromSlice {
+		if !IsVailBitcoinAddress(v) {
+			log.Error("地址格式不正确已将此笔交易删除", v)
+			if i < len(fromSlice)-1 {
+				fromSlice = append(fromSlice[:i], fromSlice[i+1:]...)
+				toSlice = append(toSlice[:i], toSlice[i+1:]...)
+				amountSlice = append(amountSlice[:i], amountSlice[i+1:]...)
+			} else {
+				// 最后一个直接删除
+				fromSlice = append(fromSlice[:i])
+				toSlice = append(toSlice[:i])
+				amountSlice = append(amountSlice[:i])
+			}
+		}
+	}
+
+	for i, v := range toSlice {
+		if !IsVailBitcoinAddress(v) {
+			log.Error("地址格式不正确已将此笔交易删除", v)
+			if i < len(toSlice)-1 {
+				fromSlice = append(fromSlice[:i], fromSlice[i+1:]...)
+				toSlice = append(toSlice[:i], toSlice[i+1:]...)
+				amountSlice = append(amountSlice[:i], amountSlice[i+1:]...)
+			} else {
+				fromSlice = append(fromSlice[:i])
+				toSlice = append(toSlice[:i])
+				amountSlice = append(amountSlice[:i])
+			}
+		}
+	}
+
+	for i, v := range amountSlice {
+		if v < 0 {
+			log.Error("转账金额不能为负数")
+			if i < len(amountSlice)-1 {
+				fromSlice = append(fromSlice[:i], fromSlice[i+1:]...)
+				toSlice = append(toSlice[:i], toSlice[i+1:]...)
+				amountSlice = append(amountSlice[:i], amountSlice[i+1:]...)
+			} else {
+				fromSlice = append(fromSlice[:i])
+				toSlice = append(toSlice[:i])
+				amountSlice = append(amountSlice[:i])
+			}
+		}
+	}
+
+	var tss []Transaction
+	wallets := NewWallets(bc.DB)
+	for index, fromAddress := range fromSlice {
+		fromKeys, ok := wallets.Wallets[fromAddress]
+		if !ok {
+			log.Error("没有找到地址所对应的公钥，跳过此笔交易")
+			continue
+		}
+		toKeysPublicKeyHash := getPublicKeyHashFromAddress(toSlice[index])
+
+		if fromAddress == toSlice[index] {
+			log.Error("转账地址不能相同")
+			return
+		}
+		u := UTXOHandle{
+			bc,
+		}
+		u.
+	}
+
+}
