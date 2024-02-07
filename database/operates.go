@@ -1,6 +1,7 @@
 package database
 
 import (
+	"errors"
 	"github.com/boltdb/bolt"
 	log "github.com/corgi-kx/logcustom"
 )
@@ -31,6 +32,30 @@ func (bd *BlockchainDB) Put(k, v []byte, bt BucketType) {
 	if err != nil {
 		log.Panic(err)
 	}
+}
+
+func (bd *BlockchainDB) Delete(k []byte, bt BucketType) bool {
+	var DBFileName = "blockchain_" + ListenPort + ".db"
+	db, err := bolt.Open(DBFileName, 0600, nil)
+	defer db.Close()
+	if err != nil {
+		log.Panic(err)
+	}
+	err = db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket([]byte(bt))
+		if bucket == nil {
+			return errors.New("删除指定数据，没有对应的仓库")
+		}
+		err := bucket.Delete(k)
+		if err != nil {
+			log.Panic(err)
+		}
+		return nil
+	})
+	if err != nil {
+		log.Panic(err)
+	}
+	return true
 }
 
 func (bd *BlockchainDB) View(k []byte, bt BucketType) []byte {

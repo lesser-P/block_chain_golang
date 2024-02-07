@@ -387,6 +387,32 @@ circle:
 	log.Debug("已完成UTXO交易余额验证")
 }
 
+// 设置挖矿奖励地址
+func (bc *blockchain) SetRewardAddress(address string) {
+	bc.DB.Put([]byte(RewardAddrMapping), []byte(address), database.AddrBucket)
+}
+
+// 将交易添加到区块链中（内含挖矿操作）
+func (bc *blockchain) addBlockchain(tss []Transaction, send Sender) {
+	preBlock := bc.DB.View(bc.DB.View([]byte(LastBlockHashMapping), database.BlockBucket), database.BlockBucket)
+	block := Block{}
+	block.Deserialize(preBlock)
+	height := block.Height + 1
+	// 进行挖矿
+	newBlock, err := mineBlock(tss, bc.DB.View([]byte(RewardAddrMapping), database.BlockBucket), height)
+	if err != nil {
+		log.Warn("挖矿失败:", err)
+		return
+	}
+	// 把区块添加到本地库中
+	bc.AddBlock(newBlock)
+	// 同步到UTXO数据库中
+	handle := UTXOHandle{bc}
+	handle.Synchrodata(tss)
+	// 挖出矿后 发送高度信息到其他节点
+	send.SendVersionToPeers(newBlock.Height)
+}
+
 // 交易转账
 func (bc *blockchain) Transfer(tss []Transaction, send Sender) {
 	// 如果是创世区块的交易则无需进行数字签名验证
@@ -398,8 +424,17 @@ func (bc *blockchain) Transfer(tss []Transaction, send Sender) {
 			return
 		}
 		//进行余额验证
-
+		bc.VerifyTransBalance(&tss)
+		if len(tss) == 0 {
+			log.Error("没有通过余额检测，不予挖矿出块")
+			return
+		}
 		//如果设置了奖励地址，则挖矿成功后给予奖励代币
+		rewardAddr := bc.DB.View([]byte(RewardAddrMapping), database.AddrBucket)
+		rewardTs := bc.CreateRewardTransaction(string(rewardAddr))
+		if rewardTs.TxHash != nil {
+			tss = append(tss, rewardTs) // 在交易中添加一个奖励交易
+		}
 
 	}
 }

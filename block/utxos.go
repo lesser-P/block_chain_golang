@@ -56,6 +56,41 @@ func (u *UTXOHandle) dserialize(d []byte) []*UTXO {
 	return model
 }
 
+// 同步数据,传入交易信息，保存输出信息到数据库，剔除输入信息
+func (u *UTXOHandle) Synchrodata(tss []Transaction) {
+	// 先将全部输入插入数据库
+	for _, ts := range tss {
+		utxos := []*UTXO{}
+		for index, Vout := range ts.Vout {
+			utxos = append(utxos, &UTXO{ts.TxHash, index, Vout})
+		}
+		u.BC.DB.Put(ts.TxHash, u.serialize(utxos), database.UTXOBucket)
+	}
+	// 用输出进行剔除
+	for _, ts := range tss {
+		for index, Vint := range ts.Vint {
+			publicKeyHash := generatePublicKeyHash(Vint.PublicKey)
+			// 遍历整个utxo数据库
+			utxoByte := u.BC.DB.View(Vint.TxHash, database.UTXOBucket)
+			if len(utxoByte) == 0 {
+				log.Panic("synchrodata err : do not find utxo")
+			}
+			utxos := u.dserialize(utxoByte)
+			newUTXO := []*UTXO{}
+			for _, utxo := range utxos {
+				// 如果条件都符合则说明这个utxo已经是被vinput消费了，所以跳过不计入新的utxo
+				if utxo.Index == index && bytes.Equal(utxo.Vout.PublicKeyHash, publicKeyHash) {
+					continue
+				}
+				newUTXO = append(newUTXO, utxo)
+			}
+			// 删除原本的utxo，保存剔除掉消费后的utxo
+			u.BC.DB.Delete(Vint.TxHash, database.UTXOBucket)
+			u.BC.DB.Put(Vint.TxHash, u.serialize(newUTXO), database.UTXOBucket)
+		}
+	}
+}
+
 // 获取数据库中为消费的utxo
 func (u *UTXOHandle) findUTXOFromAddress(address string) []*UTXO {
 	publicKeyHash := getPublicKeyHashFromAddress(address)
