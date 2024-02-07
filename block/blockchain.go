@@ -2,9 +2,12 @@ package block
 
 import (
 	"block_chain_golang/database"
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	log "github.com/corgi-kx/logcustom"
+	"math/big"
 )
 
 type blockchain struct {
@@ -245,10 +248,250 @@ func (bc *blockchain) CreateTransaction(from, to string, amount string, send Sen
 			log.Error("转账地址不能相同")
 			return
 		}
-		u := UTXOHandle{
-			bc,
+		u := UTXOHandle{bc}
+		utxos := u.findUTXOFromAddress(fromAddress)
+		if len(utxos) == 0 {
+			log.Error("余额为零，无法进行转账交易")
+			return
 		}
-		u.
+
+		// 将utxos添加尚未打包进区块的交易信息
+		if tss != nil {
+			for _, ts := range tss {
+			tageVout:
+				for index, vOut := range ts.Vout {
+					// 交易输出者的公钥哈希和发起交易者公钥哈希比较
+					if bytes.Compare(vOut.PublicKeyHash, generatePublicKeyHash(fromKeys.PublicKey)) != 0 {
+						// 如果不是同一个地址那么跳过
+						continue
+					}
+					for _, utxo := range utxos {
+						if bytes.Equal(ts.TxHash, utxo.Hash) && utxo.Index == index {
+							// 如果已经添加过了就不再添加
+							continue tageVout
+						}
+					}
+					utxos = append(utxos, &UTXO{ts.TxHash, index, vOut})
+				}
+				// 剔除已经花费的utxo
+				for _, vInt := range ts.Vint {
+					for index, utxo := range utxos {
+						if bytes.Equal(vInt.TxHash, utxo.Hash) && vInt.Index == index {
+							utxos = append(utxos[:index], utxos[index+1:]...)
+						}
+					}
+				}
+			}
+		}
+
+		// 打包交易的核心操作
+		newTXInput := []TxInput{}
+		newTXOutput := []TxOutput{}
+		var amount int
+		for _, utxo := range utxos {
+			amount = amount + utxo.Vout.Value
+			// 输入交易的交易哈希是未消费输出交易的哈希
+			newTXInput = append(newTXInput, TxInput{utxo.Hash, utxo.Index, nil, fromKeys.PublicKey})
+			if amount > amountSlice[index] {
+				tfrom := TxOutput{}
+				tfrom.Value = amount - amountSlice[index]
+				tfrom.PublicKeyHash = generatePublicKeyHash(fromKeys.PublicKey)
+				tTo := TxOutput{}
+				tTo.Value = amountSlice[index]
+				tTo.PublicKeyHash = toKeysPublicKeyHash
+				newTXOutput = append(newTXOutput, tfrom)
+				newTXOutput = append(newTXOutput, tTo)
+				break
+			} else if amount == amountSlice[index] {
+				tTo := TxOutput{}
+				tTo.Value = amountSlice[index]
+				tTo.PublicKeyHash = toKeysPublicKeyHash
+				newTXOutput = append(newTXOutput, tTo)
+				break
+			}
+		}
+		//如果余额不足则会跳过不会打包进入交易
+		if amount < amountSlice[index] {
+			log.Error("余额不足，无法进行转账交易")
+			continue
+		}
+		ts := Transaction{nil, newTXInput, newTXOutput[:]}
+		ts.hash()
+		tss = append(tss, ts)
+	}
+	if tss == nil {
+		return
+	}
+	// 对交易进行签名
+	bc.signatureTransactions(tss, wallets)
+	send.SendTransToPeers(tss)
+}
+
+// 校验交易余额是否足够，如果不够则剔除
+func (bc *blockchain) VerifyTransBalance(tss *[]Transaction) {
+	// 获取每个地址的UTXO余额，并存入字典
+	var balance = map[string]int{}
+	for i := range *tss {
+		fromAddress := GetAddressFromPublicKey((*tss)[i].Vint[0].PublicKey)
+		// 获取数据库中的utxo
+		u := UTXOHandle{bc}
+		utxos := u.findUTXOFromAddress(fromAddress)
+		if len(utxos) == 0 {
+			log.Warnf("%s 余额为0！", fromAddress)
+			continue
+		}
+		amount := 0
+		for _, v := range utxos {
+			amount += v.Vout.Value
+		}
+		balance[fromAddress] = amount
 	}
 
+circle:
+	for i := range *tss {
+		fromAddress := GetAddressFromPublicKey((*tss)[i].Vint[0].PublicKey)
+		u := UTXOHandle{bc}
+		// 查看这个地址的所有未交易输出
+		utxos := u.findUTXOFromAddress(fromAddress)
+		var utxoAmount int //将要花费的utxo
+		var voutAmount int //vout剩余的utxo
+		var costAmount int //vint将要花费的总utxo减去vout剩余的utxo等于花费的钱数
+		//获取每笔vin的值
+		for _, vIn := range (*tss)[i].Vint {
+			for _, vUTXO := range utxos {
+				if bytes.Equal(vIn.TxHash, vUTXO.Hash) && vIn.Index == vUTXO.Index {
+					utxoAmount += vUTXO.Vout.Value
+				}
+			}
+		}
+		for _, vOut := range (*tss)[i].Vout {
+			if bytes.Equal(getPublicKeyHashFromAddress(fromAddress), vOut.PublicKeyHash) {
+				voutAmount += vOut.Value
+			}
+		}
+		costAmount = utxoAmount - voutAmount
+		if _, ok := balance[fromAddress]; ok {
+			balance[fromAddress] -= costAmount
+			if balance[fromAddress] < 0 {
+				log.Errorf("%s 余额不够，已将此笔交易剔除")
+				*tss = append((*tss)[:i], (*tss)[i+1:]...)
+				balance[fromAddress] += costAmount
+				goto circle
+			}
+		} else {
+			log.Errorf("%s 余额不够，已将此笔交易剔除")
+			*tss = append((*tss)[:i], (*tss)[i+1:]...)
+			goto circle
+		}
+	}
+	log.Debug("已完成UTXO交易余额验证")
+}
+
+// 交易转账
+func (bc *blockchain) Transfer(tss []Transaction, send Sender) {
+	// 如果是创世区块的交易则无需进行数字签名验证
+	if !isGenesisTransaction(tss) {
+		// 交易的数字签名验证
+		bc.verifyTransactionsSign(&tss)
+		if len(tss) == 0 {
+			log.Errorf("没有通过的数字签名验证，不予挖矿出块")
+			return
+		}
+		//进行余额验证
+
+		//如果设置了奖励地址，则挖矿成功后给予奖励代币
+
+	}
+}
+
+// 根据交易id查找对应的交易信息
+func (bc *blockchain) findTransaction(tss []Transaction, ID []byte) (Transaction, error) {
+	//先查找未插入数据库的交易
+	if len(tss) != 0 {
+		for _, tx := range tss {
+			if bytes.Compare(tx.TxHash, ID) == 0 {
+				return tx, nil
+			}
+		}
+	}
+	bci := NewBlockchainIterator(bc)
+	// 在查找数据库中存在的交易
+	for {
+		// 获取当前区块
+		block := bci.Next()
+		for _, tx := range block.Transactions {
+			if bytes.Compare(tx.TxHash, ID) == 0 {
+				return tx, nil
+			}
+		}
+		// 一只迭代到创世区块然后结束
+		var hashInt big.Int
+		hashInt.SetBytes(block.PreHash)
+		if big.NewInt(0).Cmp(&hashInt) == 0 {
+			break
+		}
+	}
+	return Transaction{}, errors.New("FindTransaction err : Transaction is not found")
+}
+
+// 签名
+func (bc *blockchain) signatureTransactions(tss []Transaction, wallets *wallets) {
+	for i := range tss {
+		// 获得这笔交易的拷贝
+		copyTs := tss[i].customCopy()
+
+		for index := range tss[i].Vint {
+			bk := bitcoinKeys{nil, tss[i].Vint[index].PublicKey, nil}
+			address := bk.getAddress()
+			//从数据库或者为打包进数据库的交易数组中，找到vint所对应的交易信息
+			trans, err := bc.findTransaction(tss, tss[i].Vint[index].TxHash)
+			if err != nil {
+				log.Fatal(err)
+			}
+			copyTs.Vint[index].Signature = nil
+			// 将拷贝后的交易里面的公钥替换为公钥hash
+			copyTs.Vint[index].PublicKey = trans.Vout[tss[i].Vint[index].Index].PublicKeyHash
+			// 对拷贝后的交易进行整体hash
+			copyTs.TxHash = copyTs.hashSign()
+			copyTs.Vint[index].PublicKey = nil
+			privKey := wallets.Wallets[string(address)].PrivateKey
+			// 进行签名操作
+			tss[i].Vint[index].Signature = ellipticCurveSign(privKey, copyTs.TxHash)
+		}
+	}
+}
+
+// 数字签名验证
+func (bc *blockchain) verifyTransactionsSign(tss *[]Transaction) {
+circle:
+	for i := range *tss {
+		copyTs := (*tss)[i].customCopy()
+		for index, Vin := range (*tss)[i].Vint {
+			findTs, err := bc.findTransaction(*tss, Vin.TxHash)
+			if err != nil {
+				log.Fatal(err)
+			}
+			// 先验证输入地址的公钥hash与指定的utxo输出的公钥hash是否相同
+			// 因为只有正确的私钥才能生成与UTXO公钥哈希匹配的公钥哈希
+			// 输入交易的TXHash就是输出交易的TXHash，为了溯源，而输入交易的TXHash则是由持有者的私钥生成
+			if !bytes.Equal(findTs.Vout[Vin.Index].PublicKeyHash, generatePublicKeyHash(Vin.PublicKey)) {
+				log.Errorf("签名验证失败 %x 笔交易的vin并非是本人", (*tss)[i].TxHash)
+				// 验证失败的话删除错误的交易再重新验证所有交易
+				*tss = append((*tss)[:i], (*tss)[i+1:]...)
+				goto circle
+			}
+			copyTs.Vint[index].Signature = nil
+			copyTs.Vint[index].PublicKey = findTs.Vout[Vin.Index].PublicKeyHash
+			copyTs.TxHash = copyTs.hashSign()
+			copyTs.Vint[index].PublicKey = nil
+			// 进行签名
+			if !ellipticCurveVerify(Vin.PublicKey, Vin.Signature, copyTs.TxHash) {
+				log.Errorf("此笔交易：%x没通过签名验证", (*tss)[i].TxHash)
+				// 跳过这笔交易
+				*tss = append((*tss)[:i], (*tss)[i+1:]...)
+				goto circle
+			}
+		}
+	}
+	log.Debug("已完成数字签名验证")
 }

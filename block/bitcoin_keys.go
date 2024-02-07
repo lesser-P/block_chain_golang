@@ -123,3 +123,61 @@ func getPublicKeyHashFromAddress(address string) []byte {
 	publicKeyHash := fullHash[1 : len(fullHash)-checkSum]
 	return publicKeyHash
 }
+
+// 使用私钥进行数字签名
+func ellipticCurveSign(privKey *ecdsa.PrivateKey, hash []byte) []byte {
+	r, s, err := ecdsa.Sign(rand.Reader, privKey, hash)
+	if err != nil {
+		log.Panic("EllipticCurveSign:", err)
+	}
+	signature := append(r.Bytes(), s.Bytes()...)
+	return signature
+}
+
+// 通过公钥信息获得地址
+func GetAddressFromPublicKey(publickey []byte) string {
+	if publickey == nil {
+		return ""
+	}
+	b := bitcoinKeys{PublicKey: publickey}
+	return string(b.getAddress())
+}
+
+// 使用公钥进行签名验证
+func ellipticCurveVerify(pubKey []byte, signature []byte, hash []byte) bool {
+	//拆分签名的到r，s
+	r := big.Int{}
+	s := big.Int{}
+	sigLen := len(signature)
+	//前一半
+	r.SetBytes(signature[:(sigLen / 2)])
+	//后一半
+	s.SetBytes(signature[(sigLen / 2):])
+
+	//拆分公钥
+	x := big.Int{}
+	y := big.Int{}
+	keyLen := len(pubKey)
+	x.SetBytes(pubKey[:(keyLen / 2)])
+	y.SetBytes(pubKey[(keyLen / 2):])
+
+	curve := elliptic.P256()
+	// 字节转publickey
+	rawPubKey := ecdsa.PublicKey{curve, &x, &y}
+	// 传入公钥，要验证的信息，以及签名
+	if ecdsa.Verify(&rawPubKey, hash, &r, &s) == false {
+		return false
+	}
+	return true
+}
+
+func (bk *bitcoinKeys) getAddress() []byte {
+	ripPubKey := generatePublicKeyHash(bk.PublicKey)
+	versionPublickeyHash := append([]byte(version), ripPubKey[:]...)
+	// 取最后四个字节的值
+	tailHash := checkSumHash(versionPublickeyHash)
+	// 拼接最终hash versionPublicKeyHash + checkSumHash
+	finalHash := append(versionPublickeyHash, tailHash...)
+	address := util.Base58Encode(finalHash)
+	return address
+}
