@@ -15,7 +15,7 @@ var TokenRewardNum int
 var TargetBits uint
 
 // 中文助记词地址
-var ChineseMnwordPath string
+var ChineseMnwordPath string = "../chinese_mnemonic_world.txt"
 
 // 奖励地址在数据库中的键
 const RewardAddrMapping = "rewardAddress"

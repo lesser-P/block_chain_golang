@@ -8,7 +8,7 @@ blockchain:
   #日志存放路径
   log_path: "./"
   #中文助记词种子路径
-  chinese_mnemonic_path: "./chinese_mnemonic_world.txt"
+  chinese_mnemonic_path: "/Users/yeninghui/Desktop/project/GoProjects/block_chain_golang/chinese_mnemonic_world.txt"
 network:
   #本地监听IP
   listen_host: "192.168.0.164"

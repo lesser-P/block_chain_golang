@@ -195,7 +195,7 @@ func ellipticCurveVerify(pubKey []byte, signature []byte, hash []byte) bool {
 
 func (bk *bitcoinKeys) getAddress() []byte {
 	ripPubKey := generatePublicKeyHash(bk.PublicKey)
-	versionPublickeyHash := append([]byte(version), ripPubKey[:]...)
+	versionPublickeyHash := append([]byte{version}, ripPubKey[:]...)
 	// 取最后四个字节的值
 	tailHash := checkSumHash(versionPublickeyHash)
 	// 拼接最终hash versionPublicKeyHash + checkSumHash

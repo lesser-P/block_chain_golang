@@ -375,13 +375,13 @@ circle:
 		if _, ok := balance[fromAddress]; ok {
 			balance[fromAddress] -= costAmount
 			if balance[fromAddress] < 0 {
-				log.Errorf("%s 余额不够，已将此笔交易剔除")
+				log.Errorf("%s 余额不够，已将此笔交易剔除", fromAddress)
 				*tss = append((*tss)[:i], (*tss)[i+1:]...)
 				balance[fromAddress] += costAmount
 				goto circle
 			}
 		} else {
-			log.Errorf("%s 余额不够，已将此笔交易剔除")
+			log.Errorf("%s 余额不够，已将此笔交易剔除", fromAddress)
 			*tss = append((*tss)[:i], (*tss)[i+1:]...)
 			goto circle
 		}
