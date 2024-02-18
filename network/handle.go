@@ -29,6 +29,71 @@ func handleStream(stream network.Stream) {
 		go handleHashMap(content)
 	case cGetBlock:
 		go handleGetBlock(content)
+	case cBlock:
+		go handleBlock(content)
+	case cTransaction:
+		go handleTransaction(content)
+	case cMyError:
+		go handleMyError(content)
+	}
+}
+
+// 打印接收到的错误信息
+func handleMyError(content []byte) {
+	m := myerror{}
+	m.deserialize(content)
+	log.Warn(m.Error)
+	peer := buildPeerInfoByAddr(m.Addrfrom)
+	// 删除在peerPool池中的节点id
+	delete(peerPool, fmt.Sprint(peer.ID))
+}
+
+// 接收到区块数据，进行验证后加入数据库
+func handleBlock(content []byte) {
+	block := &blc.Block{}
+	block.Deserialize(content)
+	log.Infof("本节点已接收到来自其他节点的区块数据，该块hash为：%x", block.Hash)
+	bc := blc.NewBlockchain()
+	pow := blc.NewProofOfWork(block)
+	// 重新计算本块hash，进行pow验证
+	if pow.Verify() {
+		log.Infof("POW验证通过，该区块高度为：%d", block.Height)
+		// 如果是创世区块则直接添加进本地库
+		currentHash := bc.GetBlockHashByHeight(block.Height)
+		if currentHash == nil && block.Height == 1 {
+			bc.AddBlock(block)
+			utxos := blc.UTXOHandle{bc}
+			utxos.ResetUTXODataBase() // 重置数据库
+			log.Infof("创世区块验证通过，已存入本地数据库")
+		}
+		//验证上一个区块的hash与本块中prehash是否一致
+		lastBlockHash := bc.GetBlockHashByHeight(block.Height - 1)
+
+		if lastBlockHash == nil {
+			// 如果没有最新的区块哈希说明该链没有同步到最新区块，创建一个循环，等待最新区块同步完成
+			for {
+				time.Sleep(time.Second * 1)
+				lastBlockHash = bc.GetBlockHashByHeight(block.Height - 1)
+				if lastBlockHash == nil {
+					log.Debugf("区块高度%d上为同步，等待区块同步完成...", block.Height-1)
+					break
+				}
+			}
+		}
+		// 如果上一区块hash等于本区块的prehash则通过存入本地库
+		if bytes.Equal(lastBlockHash, block.PreHash) {
+			bc.AddBlock(block)
+			utxos := blc.UTXOHandle{bc}
+			// 重置UTXOS数据库
+			// 每一笔交易都会消费一些UTXO，并生成一些新的UTXO。因此每当区块链中添加了一个新的区块，UTXO的集合都可能会发生变化。
+			utxos.ResetUTXODataBase()
+			log.Infof("prehash验证通过，区块高度为%d，已存入本地库", block.Height)
+			log.Infof("总验证通过，区块高度为%d，哈希%x，已存入本地库", block.Height, block.Hash)
+		} else {
+			log.Debugf("上一个区块高度为%d的hash值为%x，与本块中的prehash值%x不一致，固不存入区块链中", block.Height-1, lastBlockHash, block.Hash)
+		}
+	} else {
+		log.Errorf("pow验证未通过，无法将此块：%x加入数据库", block.Hash)
 	}
 }
 

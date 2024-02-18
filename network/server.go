@@ -9,7 +9,12 @@ import (
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p-core/protocol"
 	"github.com/multiformats/go-multiaddr"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 // 在P2P网络中已发现的节点池
@@ -44,5 +49,70 @@ func StartNode(clier Clier) {
 	localAddr = fmt.Sprintf("/ip4/%s/tcp/%s/p2p/%s", ListenHost, ListenPort, host.ID().Pretty())
 	log.Infof("[*] 你的p2p地址信息：%s", localAddr)
 	// 启动监听本地端口并传入一个处理流的函数，当本地节点接收到流的时候回调处理流的函数
+	host.SetStreamHandler(protocol.ID(ProtocolID), handleStream)
+	// 寻找p2p网络并加入到节点数据
+	go findP2PPeer()
+	// 检测节点池，如果发现网络当中节点有变动则打印到屏幕
+	go monitorP2PNode()
+	// 启一个go程去向其他p2p节点发送高度信息，来进行更新区块数据
+	go sendVersionToPeers()
+	// 启动程序的命令行输入环境
+	go clier.ReceiveCMD()
+	fmt.Println("本地网络节点已启动，详细信息请查看log日志")
+	signalHandle()
+}
 
+// 节点退出信号处理
+func signalHandle() {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	<-sigs
+	send.SendSignOutToPeers()
+	fmt.Println("本地节点以退出")
+	time.Sleep(time.Second)
+	os.Exit(0)
+}
+
+// 向其他p2p节点发送高度信息，来进行更新区块数据
+func sendVersionToPeers() {
+	// 如果节点池中还未存在节点的话，一直循环 直到发现以连接节点
+	for {
+		if len(peerPool) == 0 {
+			time.Sleep(time.Second)
+			continue
+		} else {
+			break
+		}
+	}
+	send.SendVersionToPeers(block.NewestBlockHeight)
+}
+
+// 一个检测程序，检测当前网络中已发现的节点
+func monitorP2PNode() {
+	currentPeerPoolNum := 0
+	for {
+		peerPoolNum := len(peerPool)
+		if peerPoolNum != currentPeerPoolNum && peerPoolNum != 0 {
+			log.Info("===========================检测到网络中P2P节点变动，当前节点池存在节点===========================")
+			for _, v := range peerPool {
+				log.Info("|    ", v, "    |")
+			}
+			log.Info("===========================================================================================")
+			currentPeerPoolNum = peerPoolNum
+		} else if peerPoolNum != currentPeerPoolNum && peerPoolNum == 0 {
+			log.Info("===========================检测到网络中P2P节点变动，当前节点池中没有节点===========================")
+			currentPeerPoolNum = peerPoolNum
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+// 启动mdns寻找p2p网络，并等待节点连接
+func findP2PPeer() {
+	peerChan := initMDNS(ctx, localHost, RendezvousString)
+	for {
+		peer := <-peerChan
+		// 把发现的节点加入节点池
+		peerPool[fmt.Sprint(peer.ID)] = peer
+	}
 }
