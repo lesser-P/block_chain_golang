@@ -5,9 +5,130 @@ import (
 	"bytes"
 	"fmt"
 	log "github.com/corgi-kx/logcustom"
+	"github.com/libp2p/go-libp2p-core/network"
+	"io/ioutil"
 	"sync"
 	"time"
 )
+
+// 对接收到的数据解析出命令，然后对不同的命令分别进行处理
+func handleStream(stream network.Stream) {
+	data, err := ioutil.ReadAll(stream)
+	if err != nil {
+		log.Panic(err)
+	}
+	// 取信息的前十二位得到命令
+	cmd, content := splitMessage(data)
+	log.Tracef("本节点已接收到命令:%s", cmd)
+	switch command(cmd) {
+	case cVersion:
+		go handleVersion(content)
+	case cGetHash:
+		go handleGetHash(content)
+	case cHashMap:
+		go handleHashMap(content)
+	case cGetBlock:
+		go handleGetBlock(content)
+	}
+}
+
+// 接收到获取区块命令，通过hash值 找到该区块 然后把该区块发送过去
+func handleGetBlock(content []byte) {
+	g := getBlock{}
+	g.deserialize(content)
+	bc := blc.NewBlockchain()
+	blockBytes := bc.GetBlockByHash(g.BlockHash)
+	data := jointMessage(cBlock, blockBytes)
+	log.Debugf("本节点已将区块数据发送到%s，该块hash为%x", g.AddrFrom, g.BlockHash)
+	send.SendMessage(buildPeerInfoByAddr(g.AddrFrom), data)
+}
+
+// 从对面节点处获取本地区块链所没有的区块hash列表，然后依次发送“获取区块命令"到该节点
+func handleHashMap(content []byte) {
+	h := hash{}
+	h.deserialize(content)
+	hm := h.HashMap
+	bc := blc.NewBlockchain()
+	lastHeight := bc.GetLastBlockHeight()
+	// 每次请求都只获取一个区块
+	targetHeight := lastHeight + 1
+	for {
+		hash := hm[targetHeight]
+		if hash == nil {
+			break
+		}
+		// 发送获取区块命令
+		g := getBlock{hash, localAddr}
+		data := jointMessage(cGetBlock, g.serialize())
+		send.SendMessage(buildPeerInfoByAddr(h.AddrFrom), data)
+		log.Debugf("已发送获取区块信息命令，目标高度为：%d", targetHeight)
+		targetHeight++
+	}
+}
+
+// 接收到获取hash列表命令，返回对面节点所没有的区块的hash信息（两条链的高度差）
+func handleGetHash(content []byte) {
+	g := getHash{}
+	g.deserialize(content)
+	bc := blc.NewBlockchain()
+	lastHeight := bc.GetLastBlockHeight()
+	hm := hashMap{}
+	// 把请求者没有的区块hash信息返回给请求者
+	for i := g.Height + 1; i < lastHeight; i++ {
+		hm[i] = bc.GetBlockHashByHeight(i)
+	}
+	h := hash{hm, localAddr}
+	data := jointMessage(cHashMap, h.serialize())
+	// 构建AddrInfo对象，然后发送数据
+	send.SendMessage(buildPeerInfoByAddr(h.AddrFrom), data)
+	log.Debugf("已发送获取hash列表命令")
+}
+
+// 接收到其他节点的区块高度，与本地区块高度进行对比
+func handleVersion(content []byte) {
+	var lock sync.Mutex
+	lock.Lock()
+	defer lock.Unlock()
+	v := version{}
+	v.deserialize(content)
+	bc := blc.NewBlockchain()
+	// 这个判断只在一开始的时候进行，它并不能保证后续代码执行中当前节点的区块高度始终大于网络中已知的最新区块高度。
+	if blc.NewestBlockHeight > v.Height {
+		log.Infof("目标高度比本链小，准备向目标发送版本信息")
+		for {
+			currentHeight := bc.GetLastBlockHeight()
+			if currentHeight < blc.NewestBlockHeight {
+				log.Info("当前正在更新区块信息，稍后发送版本信息")
+				time.Sleep(time.Second * 1)
+			} else {
+				newV := version{versionInfo, currentHeight, localAddr}
+				data := jointMessage(cVersion, newV.serialize())
+				send.SendMessage(buildPeerInfoByAddr(v.AddrFrom), data)
+				break
+			}
+		}
+	} else if blc.NewestBlockHeight < v.Height {
+		log.Debugf("对方版本比咱们大%v，发送获取区块的hash信息！", v)
+		gh := getHash{blc.NewestBlockHeight, localAddr}
+		// 把当前节点的区块高度改为网络中最新区块高度
+		blc.NewestBlockHeight = v.Height
+		data := jointMessage(cGetHash, gh.serialize())
+		/*
+			data := jointMessage(cGetHash, gh.serialize())
+			这行代码是创建一个获取区块哈希的请求消息，然后发送给网络中
+			的其他节点。这个操作本身并不会立即改变你的节点状态或数据，
+			它只是发送了一个请求。  真正的操作发生在你的节点收到其他节
+			点对这个请求的响应时。例如，当其他节点收到你的获取区块哈希
+			的请求后，它可能会返回它拥有的区块哈希。然后你的节点会接收
+			这些区块哈希，并可能根据这些哈希来请求更多的区块数据，或者更
+			新自己的区块链数据
+		*/
+		send.SendMessage(buildPeerInfoByAddr(v.AddrFrom), data)
+	} else {
+		log.Debug("接收到版本信息，双方高度一致，无需处理")
+	}
+
+}
 
 // 接收交易信息，满足条件后进行挖矿
 func handleTransaction(content []byte) {
