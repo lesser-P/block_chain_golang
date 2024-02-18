@@ -8,6 +8,8 @@ import (
 	"fmt"
 	log "github.com/corgi-kx/logcustom"
 	"math/big"
+	"os"
+	"time"
 )
 
 type blockchain struct {
@@ -529,4 +531,98 @@ circle:
 		}
 	}
 	log.Debug("已完成数字签名验证")
+}
+
+// 获取最新区块高度
+func (bc *blockchain) GetLastBlockHeight() int {
+	bli := NewBlockchainIterator(bc)
+	currentBlock := bli.Next()
+	if currentBlock == nil {
+		return 0
+	}
+	return currentBlock.Height
+}
+
+// 通过高度获取区块hash
+func (bc *blockchain) GetBlockHashByHeight(height int) []byte {
+	bli := NewBlockchainIterator(bc)
+	// 循环依次获得上一个区块
+	for {
+		lastBlock := bli.Next()
+		if lastBlock == nil {
+			return nil
+		} else if lastBlock.Height == height {
+			return lastBlock.Hash
+		} else if isGenesisBlock(lastBlock) {
+			return nil
+		}
+	}
+}
+
+// 通过区块hash获取区块信息
+func (bc *blockchain) GetBlockByHash(hash []byte) []byte {
+	return bc.DB.View(hash, database.BlockBucket)
+}
+
+// 传入地址 返回地址余额信息
+func (bc *blockchain) GetBalance(address string) int {
+	// 先验证地址格式
+	if !IsVailBitcoinAddress(address) {
+		log.Errorf("地址格式不正确：%s\n", address)
+		os.Exit(0)
+	}
+	var balance int
+	uHandle := UTXOHandle{bc}
+	utxos := uHandle.findUTXOFromAddress(address)
+	for _, v := range utxos {
+		// 累加未计算
+		balance += v.Vout.Value
+	}
+	return balance
+}
+
+func (bc *blockchain) PrintAllBlockInfo() {
+	bli := NewBlockchainIterator(bc)
+	for {
+		block := bli.Next()
+		if block == nil {
+			log.Error("还未生成创世区块!")
+			return
+		}
+		fmt.Println("=========================================================================================")
+		fmt.Printf("本块hash		%x\n", block.Hash)
+		fmt.Println("---------------------------------交易数据-----------------------------------")
+		for _, v := range block.Transactions {
+			fmt.Printf("		本次交易id：	%x\n", v.TxHash)
+			fmt.Println("		tx_input: ")
+			for _, vIn := range v.Vint {
+				fmt.Printf("		交易id：%x\n", vIn.TxHash)
+				fmt.Printf("		索引：：%d\n", vIn.Index)
+				fmt.Printf("		签名信息：%x\n", vIn.Signature)
+				fmt.Printf("		公钥：%x\n", vIn.PublicKey)
+				fmt.Printf("		地址：%s\n", GetAddressFromPublicKey(vIn.PublicKey))
+			}
+			fmt.Println("		tx_output: ")
+			for index, vOut := range v.Vout {
+				fmt.Printf("		金额：%d\n", vOut.Value)
+				fmt.Printf("		公钥哈希：%x\n", vOut.PublicKeyHash)
+				fmt.Printf("		地址：%s\n", GetAddressFromPublicKey(vOut.PublicKeyHash))
+				if len(v.Vout) != 1 && index != len(v.Vout)-1 {
+					fmt.Println("	--------------------------------------")
+				}
+			}
+		}
+		fmt.Println("	---------------------------------------------------------------------------")
+		fmt.Printf("时间戳		%s\n", time.Unix(block.TimeStamp, 0).Format("2006-01-02 03:04:05 PM"))
+		fmt.Printf("区块高度		%d\n", block.Height)
+		fmt.Printf("随机数		%d\n", block.Nonce)
+		fmt.Printf("上一个块hash		%x\n", block.PreHash)
+
+		var hashInt big.Int
+		hashInt.SetBytes(block.PreHash)
+		if big.NewInt(0).Cmp(&hashInt) == 0 {
+			break
+		}
+	}
+	fmt.Println("=============================================================================================================")
 }
