@@ -29,6 +29,28 @@ func NewBitcoinKeys(nothing []string) *bitcoinKeys {
 	return b
 }
 
+// 私钥长度为32字节
+const privKeyBytesLen = 32
+
+// 获取私钥
+func (keys *bitcoinKeys) GetPrivateKey() string {
+	d := keys.PrivateKey.D.Bytes()
+	b := make([]byte, 0, privKeyBytesLen)
+	priKey := paddedAppend(privKeyBytesLen, b, d)
+	// base58加密
+	return string(util.Base58Encode(priKey))
+
+}
+
+// 将 src 字节切片追加到 dst 字节切片中，但在追加之前，
+// 它会先在 dst 的末尾添加一些零字节，直到 dst 的长度达到 size
+func paddedAppend(size uint, dst, src []byte) []byte {
+	for i := 0; i < int(size)-len(src); i++ {
+		dst = append(dst, 0)
+	}
+	return append(dst, src...)
+}
+
 // 创建中文助记词
 func getChineseMnemonicWord() []string {
 	file, err := os.Open(ChineseMnwordPath)
