@@ -76,6 +76,26 @@ func getChineseMnemonicWord() []string {
 	return s
 }
 
+// 根据助记词创建公私钥
+func CreateBitcoinKeysByMnemonicWord(mnemonicWord []string) *bitcoinKeys {
+	if len(mnemonicWord) != 7 {
+		log.Error("助记词格式不正确，应为7对中文双字词语")
+		return nil
+	}
+
+	for _, v := range mnemonicWord {
+		if len(v) != 6 {
+			log.Error("助记词格式不正确，应为7对中文双字词语")
+			return nil
+		}
+	}
+
+	b := &bitcoinKeys{nil, nil, nil}
+	b.MnemonicWord = mnemonicWord
+	b.newKeypair()
+	return b
+}
+
 // 根据中文助记词生成公私钥对
 func (b *bitcoinKeys) newKeypair() {
 	//它返回一个实现了P-256（也被称为secp256r1或prime256v1）的椭圆曲线。
