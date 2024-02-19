@@ -3,7 +3,6 @@ package block
 import (
 	"block_chain_golang/database"
 	"bytes"
-	"crypto/elliptic"
 	"encoding/gob"
 	log "github.com/corgi-kx/logcustom"
 )
@@ -49,29 +48,6 @@ func NewWallets(bd *database.BlockchainDB) *wallets {
 		return w
 	}
 	return w
-}
-
-// 序列化
-func (b *bitcoinKeys) serliazle() []byte {
-	var result bytes.Buffer
-	gob.Register(elliptic.P256())
-	encoder := gob.NewEncoder(&result)
-
-	err := encoder.Encode(b)
-	if err != nil {
-		panic(err)
-	}
-	return result.Bytes()
-}
-
-// 反序列化
-func (v *bitcoinKeys) Deserialize(d []byte) {
-	decoder := gob.NewDecoder(bytes.NewReader(d))
-	gob.Register(elliptic.P256())
-	err := decoder.Decode(v)
-	if err != nil {
-		log.Error(err)
-	}
 }
 
 // 获得所有地址

@@ -42,6 +42,7 @@ func (cli Cli) ReceiveCMD() {
 		fmt.Print("> ")
 		// 每次读到换行
 		sendData, err := stdReader.ReadString('\n')
+		sendData = strings.TrimSuffix(sendData, "\n")
 		if err != nil {
 			fmt.Println("Error reading from stdin")
 			panic(err)

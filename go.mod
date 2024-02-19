@@ -1,6 +1,6 @@
 module block_chain_golang
 
-go 1.21
+go 1.18
 
 require (
 	github.com/boltdb/bolt v1.3.1

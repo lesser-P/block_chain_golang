@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"encoding/gob"
 	"github.com/cloudflare/cfssl/scan/crypto/sha256"
 	log "github.com/corgi-kx/logcustom"
 	"math/big"
@@ -21,8 +22,9 @@ type bitcoinKeys struct {
 // 创建公私钥实例
 func NewBitcoinKeys(nothing []string) *bitcoinKeys {
 	b := &bitcoinKeys{
-		PrivateKey: nil,
-		PublicKey:  nil,
+		PrivateKey:   nil,
+		PublicKey:    nil,
+		MnemonicWord: nil,
 	}
 	b.MnemonicWord = getChineseMnemonicWord()
 	b.newKeypair()
@@ -53,10 +55,10 @@ func paddedAppend(size uint, dst, src []byte) []byte {
 
 // 创建中文助记词
 func getChineseMnemonicWord() []string {
-	file, err := os.Open(ChineseMnwordPath)
+	file, err := os.Open("./chinese_mnemonic_world.txt")
 	defer file.Close()
 	if err != nil {
-		log.Error(err)
+		log.Panic(err)
 	}
 	s := []string{}
 	//因为种子最高40位，所以就取7对词语 7*2*3=42，返回后再截取40位
@@ -107,7 +109,7 @@ func (b *bitcoinKeys) newKeypair() {
 	// 通过椭圆曲线和助记词byte数组生成私钥
 	b.PrivateKey, err = ecdsa.GenerateKey(curve, buf)
 	if err != nil {
-		return
+		log.Panic(err)
 	}
 	b.PublicKey = append(b.PrivateKey.PublicKey.X.Bytes(), b.PrivateKey.PublicKey.Y.Bytes()...)
 }
@@ -222,4 +224,26 @@ func (bk *bitcoinKeys) getAddress() []byte {
 	finalHash := append(versionPublickeyHash, tailHash...)
 	address := util.Base58Encode(finalHash)
 	return address
+}
+
+// 序列化
+func (b *bitcoinKeys) serliazle() []byte {
+	var result bytes.Buffer
+	gob.Register(elliptic.P256())
+	encoder := gob.NewEncoder(&result)
+	err := encoder.Encode(b)
+	if err != nil {
+		panic(err)
+	}
+	return result.Bytes()
+}
+
+// 反序列化
+func (v *bitcoinKeys) Deserialize(d []byte) {
+	decoder := gob.NewDecoder(bytes.NewReader(d))
+	gob.Register(elliptic.P256())
+	err := decoder.Decode(v)
+	if err != nil {
+		log.Panic(err)
+	}
 }
