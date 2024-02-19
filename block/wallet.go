@@ -21,9 +21,10 @@ func (a *addressList) serliazle() []byte {
 
 // 反序列化地址列表
 func (v *addressList) Deserialize(d []byte) {
-	err := gob.NewDecoder(bytes.NewReader(d)).Decode(v)
+	decoder := gob.NewDecoder(bytes.NewReader(d))
+	err := decoder.Decode(v)
 	if err != nil {
-		panic(err)
+		log.Panic(err)
 	}
 }
 

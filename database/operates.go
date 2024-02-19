@@ -18,6 +18,7 @@ func (bd *BlockchainDB) Put(k, v []byte, bt BucketType) {
 	err = db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bt))
 		if bucket == nil {
+			var err error
 			bucket, err = tx.CreateBucket([]byte(bt))
 			if err != nil {
 				log.Panic(err)
