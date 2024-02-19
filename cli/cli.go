@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	log "github.com/corgi-kx/logcustom"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -32,8 +34,29 @@ func New() *Cli {
 	return &Cli{}
 }
 
+// 实现ReceiveCMD
+func (cli Cli) ReceiveCMD() {
+	// 从命令行中获取输入
+	stdReader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print("> ")
+		// 每次读到换行
+		sendData, err := stdReader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Error reading from stdin")
+			panic(err)
+		}
+		cli.userCmdHandle(sendData)
+	}
+}
+
 func (cli *Cli) Run() {
+	// 打印帮助提示
 	printUsage()
+	// 启动节点
+	go cli.startNode()
+	cli.ReceiveCMD()
+
 }
 
 // 用户输入命令解析

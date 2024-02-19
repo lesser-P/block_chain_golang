@@ -69,7 +69,8 @@ func (bd *BlockchainDB) View(k []byte, bt BucketType) []byte {
 	err = db.View(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket([]byte(bt))
 		if bucket == nil {
-			log.Error("没有对应的仓库")
+			msg := "datebase view warnning:没有找到仓库：" + string(bt)
+			return errors.New(msg)
 		}
 		result = bucket.Get(k)
 		return nil

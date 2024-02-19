@@ -2,6 +2,7 @@ package main
 
 import (
 	"block_chain_golang/block"
+	"block_chain_golang/cli"
 	"block_chain_golang/database"
 	"block_chain_golang/network"
 	"fmt"
@@ -11,7 +12,7 @@ import (
 )
 
 func init() {
-	viper.SetConfigFile("config")
+	viper.SetConfigFile("config.yaml")
 	viper.AddConfigPath(".")
 	err := viper.ReadInConfig()
 	if err != nil {
@@ -47,5 +48,6 @@ func init() {
 	log.SetOutputAll(file)
 }
 func main() {
-	
+	c := cli.New()
+	c.Run()
 }
